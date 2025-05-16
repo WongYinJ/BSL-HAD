@@ -1,0 +1,74 @@
+clear all;
+close all;
+clc;
+addpath(genpath('.\Tools'));
+% load Sandiego_new
+% load Sandiego_gt
+% Xs=hsi;
+% mask=hsi_gt;
+
+load urban_162band
+mask=groundtruth;
+Xs=urban_detection;
+
+
+% figure,imshow(f_show);
+% figure,imshow(mask,[]);
+[H,W,Dim]=size(Xs);
+num=H*W;
+
+
+for i=1:Dim
+    Xs(:,:,i) = (Xs(:,:,i)-min(min(Xs(:,:,i)))) / (max(max(Xs(:,:,i))-min(min(Xs(:,:,i)))));
+%     a=squeeze(Xs(:,:,i));
+%     a(logical(mask))=0;
+%     Xs(:,:,i)=a;
+end
+%%
+mask_reshape = reshape(mask, 1, num);
+anomaly_map = logical(double(mask_reshape)>0);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
+normal_map = logical(double(mask_reshape)==0);
+
+Smap=zeros(2,H,W);
+PDbox=zeros(2,5000);
+PFbox=zeros(2,5000);
+methodcounter=1;
+AUC=[];
+%% ===========================================
+%constract HS image
+ratio = 6; % downsampling ratio in one mode
+kernel_length=ratio+1;
+startpoint='center';
+% Ker=AniGau(kernel_length,2*pi/7,0.4,1.83);
+Ker = fspecial('gaussian',[kernel_length kernel_length],(1/(2*(2.7725887)/ratio^2))^0.5);
+% Ker=[1];%% For HAD on non-blurred HSI
+s0=1;kertol=1;
+[Xb,Pr,P] = SpatialDegrad(Xs,Ker,1,1,1,startpoint); % create HSI
+indices=[];
+%% BSL-HAD
+lrank=2;
+% srank=9;
+lambda=1e-1;
+nu=1.1;
+rho=1e0;
+MaxLoop=1e3;
+tol=1e-5;
+gamma=2e-3;
+
+[L,S] = BSL_HAD(Xb,Ker,startpoint,lrank,lambda,rho,nu,tol,gamma);
+det_map=sqrt(sum(S.^2,3));
+r_max = max(det_map(:));
+det_map=det_map/r_max;
+taus = linspace(0, 1, 5000);
+for index = 1:length(taus)
+  tau = taus(index);
+  anomaly_map_rx = (det_map(:)> tau)';
+  PF(index) = sum(anomaly_map_rx & normal_map)/sum(normal_map);
+  PD(index) = sum(anomaly_map_rx & anomaly_map)/sum(anomaly_map);
+end
+PDbox(methodcounter,:)=PD;PFbox(methodcounter,:)=PF;
+AUC=[AUC;[trapz(PF(end:-1:1),PD(end:-1:1)),trapz(taus,PD(end:-1:1)),trapz(taus,PF(end:-1:1)),trapz(PF(end:-1:1),PD(end:-1:1))+...
+    trapz(taus,PD(end:-1:1))-trapz(taus,PF(end:-1:1)),trapz(PF(end:-1:1),PD(end:-1:1))/trapz(taus,PD(end:-1:1))]];
+[~,rmse_LRTA, ~, sam_LRTA, ~,~,~,~] = quality_assessments(Xs,(L+S)*255, 0, 1.0/ratio)
+AUC_Pd_Pf=AUC(1)
+AUC_OD=AUC(4)

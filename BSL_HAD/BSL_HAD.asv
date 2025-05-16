@@ -1,0 +1,70 @@
+function [L,S] = BSL_HAD(X,ker,startpoint,lrank,lambda,rho,nu,tol,gamma)
+% Enhanced version of BTD_HAD
+%% Initialization
+[M,N,D]=size(X);
+X3=Unfold(X,3);
+[E,~,~]=svd(X3*X3');
+E=E(:,1:lrank);
+A=E'*X3;
+A=Fold(A,[M,N,lrank],3);
+L=Fold(E*Unfold(A,3),[M,N,D],3);
+S=X-L;
+
+[~,~,KerPhi] = SpatialDegrad(A,ker,1,1,1,startpoint);
+
+Eps=A;
+P=zeros(size(X));Q=zeros(size(A));
+tl1=1000*tol;tl2=1000*tol;
+loop=1;
+%% Main Loop
+while tl1>=tol | tl2>=tol
+    %Update A
+    Aaux1=Unfold(X-S+P/rho,3);Aaux2=Unfold(Eps-Q/rho,3);
+    A = Fold(CGra({E'*E,1},{KerPhi*KerPhi',1},[1,1],Unfold(A,3),E'*Aaux1*KerPhi'+Aaux2),size(A),3);
+    %Update E
+    Eaux=Unfold(X-S+P/rho,3);
+    %E = CGra({1},{Unfold(A,3)*KerPhi*(Unfold(A,3)*KerPhi)'},[1],E,Eaux*(Unfold(A,3)*KerPhi)');
+    
+    [Eaux1,~,Eaux2]=svd(Eaux*(Unfold(A,3)*KerPhi)');
+    E=Eaux1(:,1:lrank)*Eaux2';
+    %Update Eps
+    EpsB=A+Q/rho;
+    EpsBf=fft(EpsB,[],3);
+    Epsf=Eps;
+    for l=1:lrank
+        [U,Sig,V]=svd(EpsBf(:,:,l));
+        mm=min(size(Sig));
+        Epsf(:,:,l)=U(:,1:mm)*diag(LogaSparse(diag(Sig)',1/rho,gamma,1e-8))*V(:,1:mm)';
+% %          Epsf(:,:,l)=U*diag(soft(diag(Sig),1/rho))*V';
+    end
+    Eps=ifft(Epsf,[],3);
+%     [Eps_,~]=prox_tnn(EpsB,1/rho);
+    %Update S
+    Sau=Unfold(X+P/rho,3)-E*Unfold(A,3)*KerPhi;
+% %     S=Fold(LapSparse(Sau,lambda/rho,gamma,1e-5),[m,n,d],3);
+    S=Fold(L2_1(Sau,lambda/rho),[M,N,D],3);
+    %%Lagrange Multipliers
+    P=P+rho*(X-Fold(E*Unfold(A,3)*KerPhi,[M,N,D],3)-S);
+    Q=Q+rho*(A-Eps);
+    rho=nu*rho;
+    
+    L=Fold(E*Unfold(A,3)*KerPhi,[M,N,D],3);
+    tl1=norm(Unfold(X-L-S,3));
+    tl2=norm(Unfold(A-Eps,3));
+    
+    if mod(loop, 20) == 0 | loop==1
+        fprintf('Iteration No.%d，Convergence criterion=%f\n', loop, renewal);
+    end
+    if max(tl1,tl2)<tol
+        fprintf('======================Iteration No.%d，Algorithm converges======================', loop);
+        break
+    end
+    loop=loop+1
+end
+
+%% Deconvolution
+aux=Unfold(S,3);
+aux=KerPhi'\aux';
+S=Fold(aux',[M,N,D],3);
+end
+
